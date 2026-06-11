@@ -172,14 +172,7 @@ class ServerBuilderBot(commands.Bot):
         except Exception as e:
             logger.error(f"Failed to sync application commands: {e}")
 
-        # Startup sync and lock overrides disabled. Custom permission system is managed by the agent.
-
-        # Sync staff resources channel
-        try:
-            from src.core.seller_manager import setup_staff_resources
-            await setup_staff_resources(guild, self.config_data)
-        except Exception as e:
-            logger.error(f"Failed to setup staff resources: {e}")
+        # Startup staff resources setup disabled.
 
         # Ready
         logger.info("Bot is ready and waiting for slash commands. Startup sync build disabled.")

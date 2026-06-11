@@ -209,17 +209,7 @@ class ServerBuilderBot(commands.Bot):
         if evaluation["is_risky"]:
             await sec_mgr.handle_suspicious_member(member, evaluation)
             
-        # Automatically assign Unverified role
-        ver_cfg = self.config_data.get("verification", {}) if self.config_data else {}
-        unver_role_name = ver_cfg.get("unverified_role", "Unverified")
-        if unver_role_name:
-            unver_role = discord.utils.get(guild.roles, name=unver_role_name)
-            if unver_role:
-                try:
-                    await member.add_roles(unver_role, reason="New user joined, assigning Unverified role")
-                    logger.info(f"Assigned unverified role to {member.name}")
-                except Exception as e:
-                    logger.error(f"Failed to assign unverified role to {member.name}: {e}")
+
 
         welcome_chan = discord.utils.get(guild.text_channels, name="┃👋・welcome")
         if not welcome_chan:

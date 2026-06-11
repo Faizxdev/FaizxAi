@@ -1,5 +1,6 @@
-"""Root entry point — works regardless of working directory."""
 import os, sys
-sys.path.insert(0, os.path.dirname(__file__))
-from src.bot import main
-main()
+
+# Works regardless of working directory or Python path
+bot = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "bot.py")
+os.chdir(os.path.dirname(os.path.abspath(__file__)))  # ensure cwd = project root
+os.execv(sys.executable, [sys.executable, bot])

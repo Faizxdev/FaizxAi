@@ -172,14 +172,7 @@ class ServerBuilderBot(commands.Bot):
         except Exception as e:
             logger.error(f"Failed to sync application commands: {e}")
 
-        # Auto-apply channel lockdown on every startup
-        # Ensures all categories stay hidden from @everyone and only verify channel is visible
-        try:
-            from src.core.onboarding_manager import apply_channel_lockdown
-            lockdown_summary = await apply_channel_lockdown(guild, self.config_data)
-            logger.info(f"Startup lockdown applied: {lockdown_summary}")
-        except Exception as e:
-            logger.error(f"Failed to apply startup lockdown: {e}")
+        # Startup sync and lock overrides disabled. Custom permission system is managed by the agent.
 
         # Sync staff resources channel
         try:

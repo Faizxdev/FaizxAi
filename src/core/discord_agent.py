@@ -177,11 +177,17 @@ class DiscordAgent:
 
         @tool
         async def set_channel_permissions(channel_name: str, role_name: str, view_channel: bool = None, send_messages: bool = None) -> str:
-            """Adjusts override permissions for a role on a specific channel."""
+            """Adjusts override permissions for a role on a specific channel or category. role_name can be '@everyone'."""
             channel = discord.utils.get(self.guild.channels, name=channel_name)
-            role = discord.utils.get(self.guild.roles, name=role_name)
             if not channel:
-                return f"Channel '{channel_name}' not found."
+                channel = discord.utils.get(self.guild.categories, name=channel_name)
+            if not channel:
+                return f"Channel/Category '{channel_name}' not found."
+
+            if role_name.lower() == "@everyone":
+                role = self.guild.default_role
+            else:
+                role = discord.utils.get(self.guild.roles, name=role_name)
             if not role:
                 return f"Role '{role_name}' not found."
 
@@ -193,6 +199,48 @@ class DiscordAgent:
 
             await channel.set_permissions(role, overwrite=overwrite, reason="AI Agent Tool Execution")
             return f"Permissions for role '{role_name}' updated on channel '{channel_name}'."
+
+        @tool
+        async def assign_role_to_member(member_name: str, role_name: str) -> str:
+            """Assigns a role to a member in the server by their username or display name."""
+            member = discord.utils.get(self.guild.members, name=member_name)
+            if not member:
+                member = discord.utils.get(self.guild.members, display_name=member_name)
+            if not member:
+                for m in self.guild.members:
+                    if m.name.lower() == member_name.lower() or m.display_name.lower() == member_name.lower():
+                        member = m
+                        break
+            if not member:
+                return f"Member '{member_name}' not found."
+
+            role = discord.utils.get(self.guild.roles, name=role_name)
+            if not role:
+                return f"Role '{role_name}' not found."
+
+            await member.add_roles(role, reason="AI Agent Tool Execution")
+            return f"Role '{role_name}' successfully assigned to member '{member.name}'."
+
+        @tool
+        async def remove_role_from_member(member_name: str, role_name: str) -> str:
+            """Removes a role from a member in the server by their username or display name."""
+            member = discord.utils.get(self.guild.members, name=member_name)
+            if not member:
+                member = discord.utils.get(self.guild.members, display_name=member_name)
+            if not member:
+                for m in self.guild.members:
+                    if m.name.lower() == member_name.lower() or m.display_name.lower() == member_name.lower():
+                        member = m
+                        break
+            if not member:
+                return f"Member '{member_name}' not found."
+
+            role = discord.utils.get(self.guild.roles, name=role_name)
+            if not role:
+                return f"Role '{role_name}' not found."
+
+            await member.remove_roles(role, reason="AI Agent Tool Execution")
+            return f"Role '{role_name}' successfully removed from member '{member.name}'."
 
         @tool
         async def ban_member(member_name: str, reason: str = "Banned by AI Agent") -> str:
@@ -431,7 +479,6 @@ class DiscordAgent:
             except Exception as e:
                 return f"Error: Failed to send announcement in #{channel.name}: {e}"
 
-        # Package tools
         tools = [
             get_server_info,
             search_server_memory,
@@ -445,7 +492,9 @@ class DiscordAgent:
             create_onboarding_system,
             add_store_product,
             delete_store_product,
-            post_announcement
+            post_announcement,
+            assign_role_to_member,
+            remove_role_from_member
         ]
         
         tools_map = {t.name: t for t in tools}

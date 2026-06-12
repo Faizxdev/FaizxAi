@@ -479,6 +479,103 @@ class DiscordAgent:
             except Exception as e:
                 return f"Error: Failed to send announcement in #{channel.name}: {e}"
 
+        @tool
+        async def scan_server_for_scams() -> str:
+            """Scans all text channels on the server for potential scam messages or images."""
+            scam_mgr = getattr(self.bot, "scam_manager", None)
+            if not scam_mgr:
+                return "Error: Scam manager not initialized on bot."
+
+            messages_scanned = 0
+            scams_found = 0
+            flagged_users = set()
+
+            for channel in self.guild.text_channels:
+                try:
+                    async for message in channel.history(limit=50):
+                        if message.author.bot:
+                            continue
+                        messages_scanned += 1
+                        score, reasons, raw_text = await scam_mgr.scan_message_scams(message)
+                        if score >= scam_mgr.config["risk_thresholds"]["delete"]:
+                            scams_found += 1
+                            flagged_users.add(message.author.id)
+                except Exception:
+                    continue
+
+            return f"Audit complete. Scanned {messages_scanned} messages across the server. Found {scams_found} potential scams from {len(flagged_users)} users."
+
+        @tool
+        async def scan_channel_for_scams(channel_name: str) -> str:
+            """Scans the specified channel's recent messages for scams and malicious attachments."""
+            channel = discord.utils.get(self.guild.text_channels, name=channel_name)
+            if not channel:
+                return f"Error: Channel '{channel_name}' not found."
+
+            scam_mgr = getattr(self.bot, "scam_manager", None)
+            if not scam_mgr:
+                return "Error: Scam manager not initialized on bot."
+
+            messages_scanned = 0
+            scams_found = 0
+            flagged_users = set()
+
+            try:
+                async for message in channel.history(limit=100):
+                    if message.author.bot:
+                        continue
+                    messages_scanned += 1
+                    score, reasons, raw_text = await scam_mgr.scan_message_scams(message)
+                    if score >= scam_mgr.config["risk_thresholds"]["delete"]:
+                        scams_found += 1
+                        flagged_users.add(message.author.id)
+            except Exception as e:
+                return f"Error auditing channel: {e}"
+
+            return f"Audit complete for #{channel_name}. Scanned {messages_scanned} messages. Found {scams_found} scams. Flagged {len(flagged_users)} users."
+
+        @tool
+        async def enable_scam_protection() -> str:
+            """Enables auto-deletion and auto-timeouts for high-risk scam detections."""
+            scam_mgr = getattr(self.bot, "scam_manager", None)
+            if not scam_mgr:
+                return "Error: Scam manager not initialized on bot."
+
+            scam_mgr.config["auto_delete"] = True
+            scam_mgr.config["auto_timeout"] = True
+            scam_mgr.save_config()
+            return "Success: Scam protection features (auto-delete, auto-timeout) have been enabled."
+
+        @tool
+        async def disable_scam_protection() -> str:
+            """Disables auto-deletion and auto-timeouts for scam detections."""
+            scam_mgr = getattr(self.bot, "scam_manager", None)
+            if not scam_mgr:
+                return "Error: Scam manager not initialized on bot."
+
+            scam_mgr.config["auto_delete"] = False
+            scam_mgr.config["auto_timeout"] = False
+            scam_mgr.save_config()
+            return "Success: Scam protection features (auto-delete, auto-timeout) have been disabled."
+
+        @tool
+        async def show_scam_statistics() -> str:
+            """Retrieves Scam Shield performance statistics and history count."""
+            scam_mgr = getattr(self.bot, "scam_manager", None)
+            if not scam_mgr:
+                return "Error: Scam manager not initialized on bot."
+
+            stats = scam_mgr.get_stats()
+            import json
+            return json.dumps({
+                "messages_scanned": stats["messages_scanned"],
+                "images_scanned": stats["images_scanned"],
+                "scams_found": stats["scams_found"],
+                "users_flagged": stats["users_flagged"],
+                "cached_image_hashes": len(scam_mgr.image_cache),
+                "recorded_history_logs": len(scam_mgr.history)
+            })
+
         tools = [
             get_server_info,
             search_server_memory,
@@ -494,7 +591,12 @@ class DiscordAgent:
             delete_store_product,
             post_announcement,
             assign_role_to_member,
-            remove_role_from_member
+            remove_role_from_member,
+            scan_server_for_scams,
+            scan_channel_for_scams,
+            enable_scam_protection,
+            disable_scam_protection,
+            show_scam_statistics
         ]
         
         tools_map = {t.name: t for t in tools}

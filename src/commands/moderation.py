@@ -172,6 +172,129 @@ class Moderation(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to write to moderation-logs: {e}")
 
+    @app_commands.command(name="scan-channel-scams", description="Scan recent messages in this channel for scams and images.")
+    @app_commands.checks.has_permissions(manage_messages=True)
+    async def scan_channel_scams(self, interaction: discord.Interaction, limit: int = 50):
+        await interaction.response.defer(ephemeral=True)
+        
+        limit = max(1, min(limit, 250))
+        scam_mgr = getattr(self.bot, "scam_manager", None)
+        if not scam_mgr:
+            await interaction.followup.send("❌ Scam manager is not initialized.", ephemeral=True)
+            return
+
+        messages_scanned = 0
+        images_scanned = 0
+        scams_found = 0
+        flagged_users = set()
+
+        async for message in interaction.channel.history(limit=limit):
+            if message.author.bot:
+                continue
+                
+            messages_scanned += 1
+            if message.attachments:
+                for attachment in message.attachments:
+                    if any(attachment.filename.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]):
+                        images_scanned += 1
+
+            score, reasons, raw_text = await scam_mgr.scan_message_scams(message)
+            if score >= scam_mgr.config["risk_thresholds"]["delete"]:
+                scams_found += 1
+                flagged_users.add(message.author.id)
+
+        embed = discord.Embed(
+            title="🔍 Scam Scan Audit Complete",
+            color=discord.Color.green() if scams_found == 0 else discord.Color.red(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="Messages Scanned", value=str(messages_scanned), inline=True)
+        embed.add_field(name="Images Scanned", value=str(images_scanned), inline=True)
+        embed.add_field(name="Scams Found", value=str(scams_found), inline=True)
+        embed.add_field(name="Users Flagged", value=str(len(flagged_users)), inline=True)
+        embed.set_footer(text=interaction.guild.name)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="scam-history", description="Show a list of recent scam detections on the server.")
+    @app_commands.checks.has_permissions(manage_messages=True)
+    async def scam_history(self, interaction: discord.Interaction, limit: int = 10):
+        await interaction.response.defer(ephemeral=True)
+        
+        limit = max(1, min(limit, 50))
+        scam_mgr = getattr(self.bot, "scam_manager", None)
+        if not scam_mgr or not scam_mgr.history:
+            await interaction.followup.send("No recent scam detections found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="📜 Recent Scam Detections",
+            color=discord.Color.orange(),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        recent_events = list(reversed(scam_mgr.history))[:limit]
+        for idx, event in enumerate(recent_events):
+            val = (
+                f"**User**: <@{event['user_id']}> ({event['username']})\n"
+                f"**Score**: `{event['score']}/100`\n"
+                f"**Action**: {event['action']}\n"
+                f"**Reasons**: {', '.join(event['reasons']) or 'None'}\n"
+                f"**Text**: `{event['text']}`"
+            )
+            embed.add_field(name=f"#{idx+1} - {event['timestamp'][:19].replace('T', ' ')}", value=val, inline=False)
+            
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="scam-config", description="Configure Scam Shield settings dynamically.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def scam_config(
+        self, 
+        interaction: discord.Interaction, 
+        delete_threshold: int = None, 
+        warn_threshold: int = None, 
+        timeout_threshold: int = None, 
+        alert_channel: str = None,
+        auto_delete: bool = None,
+        auto_timeout: bool = None
+    ):
+        await interaction.response.defer(ephemeral=True)
+        
+        scam_mgr = getattr(self.bot, "scam_manager", None)
+        if not scam_mgr:
+            await interaction.followup.send("❌ Scam manager not initialized.", ephemeral=True)
+            return
+
+        # Update values
+        if delete_threshold is not None:
+            scam_mgr.config["risk_thresholds"]["delete"] = max(0, min(delete_threshold, 100))
+        if warn_threshold is not None:
+            scam_mgr.config["risk_thresholds"]["warn"] = max(0, min(warn_threshold, 100))
+        if timeout_threshold is not None:
+            scam_mgr.config["risk_thresholds"]["timeout"] = max(0, min(timeout_threshold, 100))
+        if alert_channel is not None:
+            scam_mgr.config["alert_channel"] = alert_channel.lower().replace("#", "").strip()
+        if auto_delete is not None:
+            scam_mgr.config["auto_delete"] = auto_delete
+        if auto_timeout is not None:
+            scam_mgr.config["auto_timeout"] = auto_timeout
+
+        scam_mgr.save_config()
+
+        embed = discord.Embed(
+            title="⚙️ Scam Shield Configuration Updated",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="Delete Threshold", value=f"Score >= {scam_mgr.config['risk_thresholds']['delete']}", inline=True)
+        embed.add_field(name="Warn Threshold", value=f"Score >= {scam_mgr.config['risk_thresholds']['warn']}", inline=True)
+        embed.add_field(name="Timeout Threshold", value=f"Score >= {scam_mgr.config['risk_thresholds']['timeout']}", inline=True)
+        embed.add_field(name="Alert Channel", value=f"#{scam_mgr.config.get('alert_channel', 'scam-alerts')}", inline=True)
+        embed.add_field(name="Auto Delete Active", value=str(scam_mgr.config.get("auto_delete", True)), inline=True)
+        embed.add_field(name="Auto Timeout Active", value=str(scam_mgr.config.get("auto_timeout", True)), inline=True)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @ban.error
     @kick.error
     @timeout.error
@@ -179,6 +302,9 @@ class Moderation(commands.Cog):
     @clear.error
     @lock.error
     @unlock.error
+    @scan_channel_scams.error
+    @scam_history.error
+    @scam_config.error
     async def handle_errors(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message("❌ You do not have the required permissions to run this command.", ephemeral=True)

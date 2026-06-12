@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.utils.logger import setup_logger
 from src.utils.helpers import load_yaml_config
+from src.core.scam_manager import ScamManager
 
 # Load environment configuration
 load_dotenv()
@@ -33,6 +34,7 @@ class ServerBuilderBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.config_data = config_data
         self.guild_synced = False
+        self.scam_manager = ScamManager()
 
     async def setup_hook(self):
         # Load Cogs/extensions
@@ -210,6 +212,132 @@ class ServerBuilderBot(commands.Bot):
             except Exception as e:
                 logger.error(f"Failed to send welcome message: {e}")
 
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or not message.guild:
+            return
+
+        # Check permissions: ignore administrators and Staff role
+        member = message.author
+        if isinstance(member, discord.Member):
+            is_staff = member.guild_permissions.administrator or discord.utils.get(member.roles, name="Staff") is not None
+            if is_staff:
+                await self.process_commands(message)
+                return
+
+        # Scan message
+        score, reasons, raw_text = await self.scam_manager.scan_message_scams(message)
+        
+        if score >= self.scam_manager.config["risk_thresholds"]["delete"]:
+            # Action logic
+            action_taken = "Deleted Message"
+            delete_msg = True
+            warn_user = False
+            timeout_user = False
+            urgent_alert = False
+            
+            if score >= self.scam_manager.config["risk_thresholds"]["alert"]:
+                timeout_user = True
+                urgent_alert = True
+                action_taken = "Delete Message, Timeout (1h) & Urgent Staff Alert"
+            elif score >= self.scam_manager.config["risk_thresholds"]["timeout"]:
+                timeout_user = True
+                action_taken = "Delete Message & Timeout (1h)"
+            elif score >= self.scam_manager.config["risk_thresholds"]["warn"]:
+                warn_user = True
+                action_taken = "Delete Message & Warning DM"
+                
+            # Execute actions
+            if delete_msg:
+                try:
+                    await message.delete()
+                except Exception as e:
+                    logger.error(f"Failed to delete scam message: {e}")
+                    
+            if warn_user:
+                try:
+                    embed = discord.Embed(
+                        title=f"Warning from {message.guild.name}",
+                        description=f"Your message was flagged as a potential scam and deleted.\nReason: {', '.join(reasons)}",
+                        color=discord.Color.orange(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    await member.send(embed=embed)
+                except Exception as e:
+                    logger.warning(f"Could not send warning DM to {member.name}: {e}")
+                    
+            if timeout_user:
+                try:
+                    import datetime
+                    await member.timeout(datetime.timedelta(hours=1), reason=f"Scam Shield flag ({score}/100)")
+                except Exception as e:
+                    logger.error(f"Failed to timeout user {member.name}: {e}")
+                    
+            # Log to scam-alerts channel
+            alert_chan_name = self.scam_manager.config.get("alert_channel", "scam-alerts")
+            alert_channel = discord.utils.get(message.guild.text_channels, name=alert_chan_name)
+            if not alert_channel:
+                try:
+                    category = discord.utils.get(message.guild.categories, name="👑 STAFF")
+                    overwrites = {
+                        message.guild.default_role: discord.PermissionOverwrite(view_channel=False)
+                    }
+                    alert_channel = await message.guild.create_text_channel(
+                        name=alert_chan_name,
+                        category=category,
+                        overwrites=overwrites,
+                        reason="Auto-creating scam alerts channel"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create scam alerts channel: {e}")
+                    
+            image_url = message.attachments[0].url if message.attachments else None
+            
+            if alert_channel:
+                try:
+                    log_embed = discord.Embed(
+                        title="🛡️ Scam Shield Event Log",
+                        color=discord.Color.red() if score >= 80 else discord.Color.orange(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    log_embed.add_field(name="User", value=f"{member.mention} ({member.name} - ID: {member.id})", inline=True)
+                    log_embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+                    log_embed.add_field(name="Message ID", value=message.id, inline=True)
+                    log_embed.add_field(name="Risk Score", value=f"**{score}/100**", inline=True)
+                    log_embed.add_field(name="Action Taken", value=action_taken, inline=True)
+                    log_embed.add_field(name="Reasons Triggered", value="\n".join(reasons) or "None", inline=False)
+                    log_embed.add_field(name="Scanned Content", value=raw_text[:1024], inline=False)
+                    
+                    if image_url:
+                        log_embed.set_image(url=image_url)
+                        
+                    await alert_channel.send(embed=log_embed)
+                except Exception as e:
+                    logger.error(f"Failed to post log to scam alerts channel: {e}")
+                    
+            if urgent_alert:
+                try:
+                    from src.core.security_manager import SecurityManager
+                    sec_mgr = SecurityManager(message.guild)
+                    await sec_mgr.post_scam_alert(member, message.channel, score, reasons, raw_text, action_taken, image_url)
+                except Exception as e:
+                    logger.error(f"Failed to post urgent staff scam alert: {e}")
+                    
+            # Save history log in manager
+            self.scam_manager.log_detection(
+                user_id=member.id,
+                username=member.name,
+                channel_id=message.channel.id,
+                message_id=message.id,
+                score=score,
+                reasons=reasons,
+                text=raw_text,
+                action=action_taken,
+                image_url=image_url
+            )
+            # Skip command processing for deleted scam messages
+            return
+
+        await self.process_commands(message)
 
 def main():
     token = os.getenv("DISCORD_TOKEN")

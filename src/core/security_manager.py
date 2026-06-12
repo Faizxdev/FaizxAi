@@ -195,6 +195,36 @@ class SecurityManager:
         except Exception as e:
             logger.error(f"Failed to post raid protection alert: {e}")
 
+    async def post_scam_alert(self, member: discord.Member, channel: discord.abc.GuildChannel, score: int, reasons: List[str], text: str, action_taken: str, image_url: Optional[str] = None):
+        """Sends an urgent staff alert card for high-risk scam detections."""
+        staff_logs = await self.get_staff_logs_channel()
+        if not staff_logs:
+            logger.warning("Could not find staff logs channel to post scam alert.")
+            return
+
+        embed = discord.Embed(
+            title="🚨 Urgent Scam Shield Detection",
+            description=f"A high-risk scam message was detected and processed.\n\n"
+                        f"**User**: {member.mention} ({member.name})\n"
+                        f"**Channel**: {channel.mention}\n"
+                        f"**Scam Risk Score**: `{score}/100` (CRITICAL)\n"
+                        f"**Action Taken**: {action_taken}\n\n"
+                        f"**Trigger Reasons**:\n" + "\n".join(reasons),
+            color=discord.Color.red(),
+            timestamp=discord.utils.utcnow()
+        )
+        if image_url:
+            embed.set_image(url=image_url)
+        embed.set_footer(text="FAIZxCHEATS Anti-Scam Shield Protocol")
+
+        view = SecurityAlertView(member.id)
+
+        try:
+            await staff_logs.send(content="@here 🚨 **CRITICAL SCAM DETECTED**", embed=embed, view=view)
+            logger.info(f"Posted urgent scam alert card for {member.name} in #{staff_logs.name}")
+        except Exception as e:
+            logger.error(f"Failed to send scam alert embed: {e}")
+
 
 async def handle_security_action(interaction: discord.Interaction, action: str, target_user_id: int):
     """Processes staff clicks on security alert warning cards."""

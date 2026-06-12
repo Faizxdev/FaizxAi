@@ -1,0 +1,11 @@
+{
+  "risk_thresholds": {
+    "delete": 40,
+    "warn": 60,
+    "timeout": 80,
+    "alert": 95
+  },
+  "auto_delete": true,
+  "auto_timeout": true,
+  "alert_channel": "scam-alerts"
+}
